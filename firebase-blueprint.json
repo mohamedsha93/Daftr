@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "Customer": {
+      "title": "Customer",
+      "description": "A customer in the ledger system",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Customer name" },
+        "phone": { "type": "string", "description": "Customer phone number (WhatsApp)" },
+        "totalBalance": { "type": "number", "description": "Current balance (positive = credit/له, negative = debit/عليه)" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "totalBalance"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A financial transaction for a customer",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string", "description": "Reference to the customer" },
+        "amount": { "type": "number", "description": "Transaction amount" },
+        "type": { "type": "string", "enum": ["credit", "debit"], "description": "Transaction type (credit = له, debit = عليه)" },
+        "description": { "type": "string", "description": "Transaction details" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerId", "amount", "type", "date"]
+    }
+  },
+  "firestore": {
+    "/customers": {
+      "schema": "Customer",
+      "description": "Collection of customers"
+    },
+    "/customers/{customerId}/transactions": {
+      "schema": "Transaction",
+      "description": "Sub-collection of transactions for a specific customer"
+    }
+  }
+}

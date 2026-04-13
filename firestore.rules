@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: customers
+    // Fields:
+    //   - name: string (required)
+    //   - phone: string (optional)
+    //   - totalBalance: number (required)
+    //   - createdAt: timestamp
+    //   - updatedAt: timestamp
+    //
+    // Collection: customers/{customerId}/transactions
+    // Fields:
+    //   - customerId: string (required)
+    //   - amount: number (required)
+    //   - type: string (credit | debit)
+    //   - description: string (optional)
+    //   - date: timestamp (required)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidCustomer(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.totalBalance is number &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 20));
+    }
+
+    function isValidTransaction(data) {
+      return data.amount is number && data.amount > 0 &&
+             data.type in ['credit', 'debit'] &&
+             data.date is timestamp;
+    }
+
+    // Rules
+    match /customers/{customerId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidCustomer(request.resource.data);
+      allow update: if isAuthenticated() && isValidCustomer(request.resource.data);
+      allow delete: if isAuthenticated();
+
+      match /transactions/{transactionId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+        allow update: if isAuthenticated() && isValidTransaction(request.resource.data);
+        allow delete: if isAuthenticated();
+      }
+    }
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
