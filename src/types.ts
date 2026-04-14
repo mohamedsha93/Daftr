@@ -1,19 +1,17 @@
-import { Timestamp } from 'firebase/firestore';
-
 export interface Customer {
   id: string;
   name: string;
   phone?: string;
-  totalBalance: number; // positive = credit (له), negative = debit (عليه)
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  total_balance: any; // MySQL returns as string/decimal
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Transaction {
   id: string;
-  customerId: string;
-  amount: number;
+  customer_id: string;
+  amount: any;
   type: 'credit' | 'debit';
   description?: string;
-  date: Timestamp;
+  date: string;
 }

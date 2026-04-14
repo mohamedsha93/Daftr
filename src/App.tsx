@@ -22,30 +22,8 @@ import {
   Wallet,
   RefreshCw
 } from 'lucide-react';
-import { 
-  collection, 
-  addDoc, 
-  onSnapshot, 
-  query, 
-  orderBy, 
-  doc, 
-  updateDoc, 
-  deleteDoc, 
-  Timestamp,
-  serverTimestamp,
-  getDocs,
-  increment
-} from 'firebase/firestore';
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User
-} from 'firebase/auth';
-import { db, auth } from './lib/firebase';
+import { api } from './lib/api';
 import { Customer, Transaction } from './types';
-import { handleFirestoreError, OperationType } from './lib/firestore-errors';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -62,110 +40,105 @@ import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
-const googleProvider = new GoogleAuthProvider();
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [isAddTransactionOpen, setIsAddTransactionOpen] = useState(false);
   
+  // Auth states
+  const [isLoginView, setIsLoginView] = useState(true);
+  const [authForm, setAuthForm] = useState({ username: '', password: '', fullName: '' });
+
   // Form states
   const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' });
   const [newTransaction, setNewTransaction] = useState({ amount: '', type: 'debit' as 'credit' | 'debit', description: '' });
 
   const printRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({
-    contentRef: printRef,
-  });
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setIsAuthReady(true);
-    });
-    return () => unsubscribe();
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+    }
+    setIsAuthReady(true);
   }, []);
 
   useEffect(() => {
-    if (!user || !isAuthReady) return;
-
-    const q = query(collection(db, 'customers'), orderBy('updatedAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const customerData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Customer[];
-      setCustomers(customerData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'customers');
-    });
-
-    return () => unsubscribe();
-  }, [user, isAuthReady]);
+    if (user) {
+      fetchCustomers();
+    }
+  }, [user]);
 
   useEffect(() => {
-    if (!selectedCustomer || !user) {
-      setTransactions([]);
-      return;
+    if (selectedCustomer) {
+      fetchTransactions(selectedCustomer.id);
     }
+  }, [selectedCustomer]);
 
-    const q = query(
-      collection(db, `customers/${selectedCustomer.id}/transactions`),
-      orderBy('date', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const transactionData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Transaction[];
-      setTransactions(transactionData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `customers/${selectedCustomer.id}/transactions`);
-    });
-
-    return () => unsubscribe();
-  }, [selectedCustomer, user]);
-
-  const handleLogin = async () => {
+  const fetchCustomers = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
-      toast.success('تم تسجيل الدخول بنجاح');
+      const data = await api.customers.getAll();
+      setCustomers(data);
     } catch (error) {
-      console.error(error);
-      toast.error('فشل تسجيل الدخول');
+      toast.error('فشل في جلب قائمة العملاء');
     }
   };
 
-  const handleLogout = async () => {
+  const fetchTransactions = async (customerId: string) => {
     try {
-      await signOut(auth);
-      setSelectedCustomer(null);
-      toast.success('تم تسجيل الخروج');
+      const data = await api.transactions.getByCustomer(customerId);
+      setTransactions(data);
     } catch (error) {
-      console.error(error);
+      toast.error('فشل في جلب المعاملات');
     }
+  };
+
+  const handleLogin = async () => {
+    try {
+      const data = await api.auth.login(authForm.username, authForm.password);
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      setUser(data.user);
+      toast.success('تم تسجيل الدخول بنجاح');
+    } catch (error) {
+      toast.error('فشل تسجيل الدخول، تأكد من البيانات');
+    }
+  };
+
+  const handleRegister = async () => {
+    try {
+      await api.auth.register(authForm.username, authForm.password, authForm.fullName);
+      toast.success('تم إنشاء الحساب بنجاح، يمكنك تسجيل الدخول الآن');
+      setIsLoginView(true);
+    } catch (error) {
+      toast.error('فشل إنشاء الحساب');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setSelectedCustomer(null);
+    toast.success('تم تسجيل الخروج');
   };
 
   const handleAddCustomer = async () => {
     if (!newCustomer.name) return;
     try {
-      await addDoc(collection(db, 'customers'), {
-        name: newCustomer.name,
-        phone: newCustomer.phone,
-        totalBalance: 0,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+      await api.customers.create(newCustomer.name, newCustomer.phone);
       setNewCustomer({ name: '', phone: '' });
       setIsAddCustomerOpen(false);
+      fetchCustomers();
       toast.success('تم إضافة العميل بنجاح');
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'customers');
+      toast.error('فشل إضافة العميل');
     }
   };
 
@@ -175,69 +148,53 @@ export default function App() {
     if (isNaN(amount)) return;
 
     try {
-      // Add transaction
-      await addDoc(collection(db, `customers/${selectedCustomer.id}/transactions`), {
-        customerId: selectedCustomer.id,
-        amount,
-        type: newTransaction.type,
-        description: newTransaction.description,
-        date: serverTimestamp()
-      });
-
-      // Update customer balance atomically using increment
-      const balanceChange = newTransaction.type === 'credit' ? amount : -amount;
-
-      await updateDoc(doc(db, 'customers', selectedCustomer.id), {
-        totalBalance: increment(balanceChange),
-        updatedAt: serverTimestamp()
-      });
-
+      await api.transactions.create(selectedCustomer.id, amount, newTransaction.type, newTransaction.description);
       setNewTransaction({ amount: '', type: 'debit', description: '' });
       setIsAddTransactionOpen(false);
+      
+      // Refresh data
+      fetchTransactions(selectedCustomer.id);
+      fetchCustomers();
+      
+      // Update selected customer balance locally for immediate UI update
+      const balanceChange = newTransaction.type === 'credit' ? amount : -amount;
+      setSelectedCustomer({
+        ...selectedCustomer,
+        total_balance: parseFloat(selectedCustomer.total_balance) + balanceChange
+      });
+
       toast.success('تم تسجيل المعاملة بنجاح');
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'transactions');
+      toast.error('فشل تسجيل المعاملة');
     }
   };
 
   const handleDeleteCustomer = async (id: string) => {
     if (!confirm('هل أنت متأكد من حذف هذا العميل وجميع معاملاته؟')) return;
     try {
-      // Note: In a real app, you'd delete subcollections too. 
-      // Firestore doesn't delete subcollections automatically.
-      await deleteDoc(doc(db, 'customers', id));
+      await api.customers.delete(id);
       if (selectedCustomer?.id === id) setSelectedCustomer(null);
+      fetchCustomers();
       toast.success('تم حذف العميل');
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `customers/${id}`);
+      toast.error('فشل حذف العميل');
     }
   };
 
   const recalculateBalance = async (customerId: string) => {
     try {
       const loadingToast = toast.loading('جاري إعادة حساب الرصيد...');
-      const transactionsSnap = await getDocs(collection(db, `customers/${customerId}/transactions`));
+      const data = await api.customers.recalculate(customerId);
       
-      let total = 0;
-      transactionsSnap.forEach((doc) => {
-        const data = doc.data();
-        const amount = data.amount || 0;
-        if (data.type === 'credit') {
-          total += amount;
-        } else {
-          total -= amount;
-        }
+      setSelectedCustomer({
+        ...selectedCustomer,
+        total_balance: data.totalBalance
       });
-
-      await updateDoc(doc(db, 'customers', customerId), {
-        totalBalance: total,
-        updatedAt: serverTimestamp()
-      });
+      fetchCustomers();
 
       toast.dismiss(loadingToast);
       toast.success('تم إعادة حساب الرصيد بنجاح');
     } catch (error) {
-      console.error('Recalculate error:', error);
       toast.error('حدث خطأ أثناء إعادة الحساب');
     }
   };
@@ -307,9 +264,9 @@ export default function App() {
     
     const pdfData = await generatePDF(false);
     
-    const balanceText = selectedCustomer.totalBalance >= 0 
-      ? `له: ${selectedCustomer.totalBalance}` 
-      : `عليه: ${Math.abs(selectedCustomer.totalBalance)}`;
+    const balanceText = selectedCustomer.total_balance >= 0 
+      ? `له: ${selectedCustomer.total_balance}` 
+      : `عليه: ${Math.abs(selectedCustomer.total_balance)}`;
     
     let message = `*كشف حساب: ${selectedCustomer.name}*\n`;
     message += `*الرصيد الحالي: ${balanceText}*\n\n`;
@@ -373,13 +330,69 @@ export default function App() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <Button onClick={handleLogin} size="lg" className="w-full text-lg h-14 gap-3">
-              <LogIn className="w-6 h-6" />
-              تسجيل الدخول باستخدام جوجل
-            </Button>
-            <p className="text-xs text-center text-muted-foreground">
-              يجب تسجيل الدخول للوصول إلى بياناتك بأمان
-            </p>
+            {isLoginView ? (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>اسم المستخدم</Label>
+                  <Input 
+                    value={authForm.username} 
+                    onChange={(e) => setAuthForm({...authForm, username: e.target.value})}
+                    placeholder="أدخل اسم المستخدم"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>كلمة المرور</Label>
+                  <Input 
+                    type="password"
+                    value={authForm.password} 
+                    onChange={(e) => setAuthForm({...authForm, password: e.target.value})}
+                    placeholder="••••••••"
+                  />
+                </div>
+                <Button onClick={handleLogin} size="lg" className="w-full text-lg h-14">
+                  تسجيل الدخول
+                </Button>
+                <p className="text-center text-sm">
+                  ليس لديك حساب؟{' '}
+                  <button onClick={() => setIsLoginView(false)} className="text-primary font-bold">إنشاء حساب جديد</button>
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>الاسم الكامل</Label>
+                  <Input 
+                    value={authForm.fullName} 
+                    onChange={(e) => setAuthForm({...authForm, fullName: e.target.value})}
+                    placeholder="أدخل اسمك الكامل"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>اسم المستخدم</Label>
+                  <Input 
+                    value={authForm.username} 
+                    onChange={(e) => setAuthForm({...authForm, username: e.target.value})}
+                    placeholder="اختر اسم مستخدم"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>كلمة المرور</Label>
+                  <Input 
+                    type="password"
+                    value={authForm.password} 
+                    onChange={(e) => setAuthForm({...authForm, password: e.target.value})}
+                    placeholder="••••••••"
+                  />
+                </div>
+                <Button onClick={handleRegister} size="lg" className="w-full text-lg h-14">
+                  إنشاء الحساب
+                </Button>
+                <p className="text-center text-sm">
+                  لديك حساب بالفعل؟{' '}
+                  <button onClick={() => setIsLoginView(true)} className="text-primary font-bold">تسجيل الدخول</button>
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -401,8 +414,10 @@ export default function App() {
             
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full">
-                <img src={user.photoURL || ''} alt="" className="w-6 h-6 rounded-full" />
-                <span className="text-sm font-medium hidden md:block">{user.displayName}</span>
+                <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-white text-[10px]">
+                  {user.fullName?.charAt(0) || user.username?.charAt(0)}
+                </div>
+                <span className="text-sm font-medium hidden md:block">{user.fullName || user.username}</span>
               </div>
               <Button variant="ghost" size="icon" onClick={handleLogout} title="تسجيل الخروج">
                 <LogOut className="w-5 h-5" />
@@ -477,13 +492,13 @@ export default function App() {
                         <div className="flex-1 min-w-0">
                           <h3 className="font-bold truncate">{customer.name}</h3>
                           <div className="flex items-center gap-2 mt-1">
-                            {customer.totalBalance >= 0 ? (
+                            {parseFloat(customer.total_balance) >= 0 ? (
                               <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                له: {customer.totalBalance.toLocaleString()}
+                                له: {parseFloat(customer.total_balance).toLocaleString()}
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-                                عليه: {Math.abs(customer.totalBalance).toLocaleString()}
+                                عليه: {Math.abs(parseFloat(customer.total_balance)).toLocaleString()}
                               </Badge>
                             )}
                           </div>
@@ -522,7 +537,7 @@ export default function App() {
                           )}
                           <span className="flex items-center gap-1">
                             <History className="w-3 h-3" />
-                            آخر تحديث: {selectedCustomer.updatedAt?.toDate().toLocaleDateString('ar-EG')}
+                            آخر تحديث: {new Date(selectedCustomer.updated_at).toLocaleDateString('ar-EG')}
                           </span>
                         </div>
                       </div>
@@ -540,7 +555,7 @@ export default function App() {
                     </CardHeader>
                     <CardContent>
                       <div className="grid grid-cols-2 gap-4 mt-4">
-                        <div className={`p-4 rounded-xl border-2 relative group ${selectedCustomer.totalBalance >= 0 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
+                        <div className={`p-4 rounded-xl border-2 relative group ${parseFloat(selectedCustomer.total_balance) >= 0 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
                           <div className="flex justify-between items-start mb-1">
                             <p className="text-sm font-medium text-muted-foreground">الرصيد الإجمالي</p>
                             <Button 
@@ -553,10 +568,10 @@ export default function App() {
                               <RefreshCw className="w-3 h-3" />
                             </Button>
                           </div>
-                          <p className={`text-3xl font-black ${selectedCustomer.totalBalance >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                            {selectedCustomer.totalBalance.toLocaleString()}
+                          <p className={`text-3xl font-black ${parseFloat(selectedCustomer.total_balance) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            {parseFloat(selectedCustomer.total_balance).toLocaleString()}
                             <span className="text-sm font-normal mr-2">
-                              {selectedCustomer.totalBalance >= 0 ? 'له' : 'عليه'}
+                              {parseFloat(selectedCustomer.total_balance) >= 0 ? 'له' : 'عليه'}
                             </span>
                           </p>
                         </div>
@@ -652,17 +667,17 @@ export default function App() {
                             transactions.map((t) => (
                               <TableRow key={t.id}>
                                 <TableCell className="font-medium">
-                                  {t.date?.toDate().toLocaleDateString('ar-EG')}
+                                  {new Date(t.date).toLocaleDateString('ar-EG')}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">{t.description || '-'}</TableCell>
                                 <TableCell className="text-center">
                                   {t.type === 'credit' ? (
-                                    <span className="text-green-600 font-bold">{t.amount.toLocaleString()}</span>
+                                    <span className="text-green-600 font-bold">{parseFloat(t.amount).toLocaleString()}</span>
                                   ) : '-'}
                                 </TableCell>
                                 <TableCell className="text-center">
                                   {t.type === 'debit' ? (
-                                    <span className="text-red-600 font-bold">{t.amount.toLocaleString()}</span>
+                                    <span className="text-red-600 font-bold">{parseFloat(t.amount).toLocaleString()}</span>
                                   ) : '-'}
                                 </TableCell>
                               </TableRow>
@@ -708,12 +723,12 @@ export default function App() {
                         </div>
                         <div className="space-y-4">
                           <h2 className="text-xl font-bold border-r-4 border-primary pr-3">ملخص الحساب</h2>
-                          <div className={`p-4 rounded-xl border-2 text-center ${selectedCustomer.totalBalance >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                          <div className={`p-4 rounded-xl border-2 text-center ${parseFloat(selectedCustomer.total_balance) >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                             <p className="text-slate-600 mb-1">الرصيد الإجمالي</p>
-                            <p className={`text-3xl font-black ${selectedCustomer.totalBalance >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                              {selectedCustomer.totalBalance.toLocaleString()}
+                            <p className={`text-3xl font-black ${parseFloat(selectedCustomer.total_balance) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                              {parseFloat(selectedCustomer.total_balance).toLocaleString()}
                               <span className="text-lg font-normal mr-2">
-                                {selectedCustomer.totalBalance >= 0 ? 'له' : 'عليه'}
+                                {parseFloat(selectedCustomer.total_balance) >= 0 ? 'له' : 'عليه'}
                               </span>
                             </p>
                           </div>
@@ -735,13 +750,13 @@ export default function App() {
                           <tbody>
                             {transactions.map((t) => (
                               <tr key={t.id} className="hover:bg-slate-50">
-                                <td className="border-2 border-slate-200 p-4">{t.date?.toDate().toLocaleDateString('ar-EG')}</td>
+                                <td className="border-2 border-slate-200 p-4">{new Date(t.date).toLocaleDateString('ar-EG')}</td>
                                 <td className="border-2 border-slate-200 p-4 text-slate-600">{t.description || '-'}</td>
                                 <td className="border-2 border-slate-200 p-4 text-center text-green-700 font-bold">
-                                  {t.type === 'credit' ? t.amount.toLocaleString() : '-'}
+                                  {t.type === 'credit' ? parseFloat(t.amount).toLocaleString() : '-'}
                                 </td>
                                 <td className="border-2 border-slate-200 p-4 text-center text-red-700 font-bold">
-                                  {t.type === 'debit' ? t.amount.toLocaleString() : '-'}
+                                  {t.type === 'debit' ? parseFloat(t.amount).toLocaleString() : '-'}
                                 </td>
                               </tr>
                             ))}
